@@ -4,20 +4,12 @@ import { promises as fs } from 'fs'
 import { SharedMemory, shmIter, Pool } from '../../lib'
 import { getBendec } from './types'
 
-function dumpBuffers(buffers: Buffer[]) {
-  buffers.forEach(buffer => {
-    buffer.forEach(v => {
-      process.stdout.write(('0' + v.toString(16)).substr(-2) + ' ')
-    })
-    console.log('')
-  })
-}
-
 test('shm iterator', async t2 => {
-  const MSG_SIZE = 11
+  const bendec = getBendec()
+  
+  const MSG_SIZE = bendec.getSize('Sample')
   const MSG_SIZE_WITH_HEADER = MSG_SIZE + Pool.MESSAGE_HEADER_SIZE
   const OVERLAP = MSG_SIZE_WITH_HEADER
-
   const config = {
     path: '/dev/shm/test',
     size: 64,
@@ -28,15 +20,18 @@ test('shm iterator', async t2 => {
 
   await fs.unlink(config.path).catch(() => undefined)
 
-  const bendec = getBendec()
   const sharedMemory = new SharedMemory(config)
   const buffers = sharedMemory.getBuffers()
 
   const pool = Pool.withBuffers(bendec, buffers, config.overlap)
 
   const slices = range(1, 11).map(i => {
-    const slice = pool.sliceSize(MSG_SIZE)
-    slice.write('abcdefgijk', 1)
+    const slice = pool.slice('Sample')
+    
+    bendec.encode({
+      foo: 'dupa jasiu'.split('').map(char => char.charCodeAt(0))
+    }, slice)
+    console.log(slice)
     return slice
   })
 
@@ -58,6 +53,7 @@ test('shm iterator', async t2 => {
         const result = [...iter]
 
         subSlice.forEach((buffer, i) => {
+          // console.log('read',bendec.decode(buffer))
           t.deepEquals(result[i][1], buffer)
         })
       })
