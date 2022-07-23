@@ -31,7 +31,6 @@ test('shm iterator', async t2 => {
     bendec.encode({
       foo: 'dupa jasiu'.split('').map(char => char.charCodeAt(0))
     }, slice)
-    console.log(slice)
     return slice
   })
 
@@ -53,7 +52,6 @@ test('shm iterator', async t2 => {
         const result = [...iter]
 
         subSlice.forEach((buffer, i) => {
-          // console.log('read',bendec.decode(buffer))
           t.deepEquals(result[i][1], buffer)
         })
       })
