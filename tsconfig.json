@@ -1,7 +1,7 @@
 {
   "include": [
     "src"
-  ],
+, "src/tmp/iterTest.ts"  ],
   "exclude": [
     "src/ts/**/*"
   ],
