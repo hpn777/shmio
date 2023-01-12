@@ -14,7 +14,7 @@ const types = [
       {
         name: 'foo',
         type: 'u8',
-        length: 12,
+        length: 13,
       },
     ],
   },

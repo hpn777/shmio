@@ -6,8 +6,9 @@
   "main": "src",
   "gypfile": true,
   "dependencies": {
-    "bendec": "0.34.0",
+    "bendec": "0.40.0",
     "lodash": "4.17.21",
+    "nan": "^2.17.0",
     "rxjs": "7.5.6"
   },
   "scripts": {

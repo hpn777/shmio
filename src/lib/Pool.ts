@@ -21,7 +21,7 @@ const HEADER_SIZE: number = 8
  * [u32][message]
  * first 4 bytes - size of message
  */
-const MESSAGE_HEADER_SIZE: number = 4
+const MESSAGE_HEADER_SIZE: number = 2
 
 /**
  * Buffer Pool

@@ -1,24 +1,29 @@
-import { Pool } from './Pool'
-import { SharedMemory, SharedMemoryConfig } from './SharedMemory'
+import { SharedMemory } from './SharedMemory'
 import { ShmItem, SharedMemoryIterator } from './SharedMemoryIterator'
 import { Observable, of, concat, interval } from 'rxjs'
 import { filter, map, share } from 'rxjs/operators'
+import { getBendec } from './memHeader'
 
 class SharedMemoryConsumer {
-  private sharedMemory: SharedMemory
   private buffers: Buffer[]
+  private dataOffset: number
+  private memHeaderWrapper: any
 
-  constructor(config: SharedMemoryConfig) {
-    this.sharedMemory = new SharedMemory(config)
-    this.buffers = this.sharedMemory.getBuffers()
+  constructor(private sharedMemory: SharedMemory,) {
+    this.buffers = sharedMemory.getBuffers()
+
+    const mhBendec = getBendec()
+    this.memHeaderWrapper = mhBendec.getWrapper('MemHeader')
+    this.memHeaderWrapper.setBuffer(this.buffers[0])
+    this.dataOffset = Number(this.memHeaderWrapper.dataOffset)
   }
 
   /**
    * Full stream of data with initial data and updates in one Observable
    */
   public getAll(pollInterval: number = 10): Observable<Iterable<ShmItem>> {
-    let currentIndex = Pool.HEADER_SIZE
-    const endIndex = Math.max(this.getSize(), Pool.HEADER_SIZE)
+    let currentIndex = this.dataOffset
+    const endIndex = Math.max(this.getSize(), this.dataOffset)
 
     const shmIter = new SharedMemoryIterator(
       this.sharedMemory,
@@ -28,7 +33,7 @@ class SharedMemoryConsumer {
     const currentData$ = of(shmIter)
 
     currentIndex = endIndex
-
+    
     return concat(
       currentData$,
       interval(pollInterval).pipe(
@@ -48,15 +53,14 @@ class SharedMemoryConsumer {
     )
   }
 
-  public getData(fromIndex: number = Pool.HEADER_SIZE) {
-    return new SharedMemoryIterator(this.sharedMemory, fromIndex)
+
+  public getData(fromIndex: number = this.dataOffset) {
+    const buffers = this.sharedMemory.getBuffers()
+    return new SharedMemoryIterator(this.sharedMemory, fromIndex, this.getSize())
   }
 
   private getSize(): number {
-    return (
-      this.buffers[0].readUInt32LE(0) +
-      this.buffers[0].readUInt32LE(4) * 0x100000000
-    )
+    return Number(this.memHeaderWrapper.size)
   }
 }
 

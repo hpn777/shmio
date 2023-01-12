@@ -1,16 +1,8 @@
-import { Pool } from './Pool'
-import { SharedMemory, SharedMemoryConfig } from './SharedMemory'
+import { SharedMemory } from './SharedMemory'
 
 type ShmItem = [number, Buffer, number]
+const MESSAGE_HEADER_SIZE = 2
 
-/**
- * Iterator over a messages in the (commited) shared memory
- * TODO: Perhaps use generator for this?
- * TODO: generator perf tests
- *
- * see lib/Pool.ts for details of the memory layout
- *
- */
 class SharedMemoryIterator implements Iterator<ShmItem> {
   // all buffers
   private buffers: Buffer[]
@@ -35,13 +27,15 @@ class SharedMemoryIterator implements Iterator<ShmItem> {
 
   constructor(
     private sharedMemory: SharedMemory,
-    fromIndex: number = Pool.HEADER_SIZE,
-    toIndex?: number,
+    fromIndex: number,
+    toIndex: number,
   ) {
     const overlap = sharedMemory.getConfig().overlap
     this.buffers = sharedMemory.getBuffers()
     this.bufferLength = this.buffers[0].length - overlap
-   
+
+    this.totalSize = toIndex
+
     this.bufferIndex = Math.floor(fromIndex / this.bufferLength)
 
     this.buffersTotal = this.bufferLength * this.bufferIndex
@@ -49,17 +43,9 @@ class SharedMemoryIterator implements Iterator<ShmItem> {
     this.currentBuffer = this.buffers[this.bufferIndex]
     this.index = fromIndex % this.bufferLength
 
-    if (toIndex !== undefined) {
-      this.totalSize = toIndex
-    } else {
-      this.totalSize =
-        this.buffers[0].readUInt32LE(0) +
-        this.buffers[0].readUInt32LE(4) * 0x100000000
-    }
-
     // if size is size of our header then overwrite next method
     // so we can finish immediately
-    if (this.totalSize <= Pool.HEADER_SIZE) {
+    if (this.totalSize <= fromIndex) {
       // Strange because:
       // https://github.com/Microsoft/TypeScript/issues/11375
       // https://github.com/Microsoft/TypeScript/issues/28670
@@ -80,15 +66,14 @@ class SharedMemoryIterator implements Iterator<ShmItem> {
         done: true,
       }
     }
-
-    const size = this.currentBuffer.readUInt32LE(this.index)
-
+    let intIndex = this.index
+    const size = this.currentBuffer.readUInt16LE(this.index)
     const item = {
       value: [
         this.buffersTotal + this.index,
         this.currentBuffer.slice(
-          (this.index += Pool.MESSAGE_HEADER_SIZE),
-          this.index + size
+          (this.index + MESSAGE_HEADER_SIZE),
+          this.index + size - MESSAGE_HEADER_SIZE
         ),
         size,
         size,
@@ -111,8 +96,8 @@ class SharedMemoryIterator implements Iterator<ShmItem> {
 
 const shmIter = (
   sharedMemory: SharedMemory,
-  fromIndex: number = Pool.HEADER_SIZE,
-  toIndex?: number,
+  fromIndex: number,
+  toIndex: number,
 ) => {
   return new SharedMemoryIterator(sharedMemory, fromIndex, toIndex)
 }

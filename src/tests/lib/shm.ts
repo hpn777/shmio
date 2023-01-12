@@ -6,7 +6,10 @@ import { getBendec } from './types'
 
 test('shm iterator', async t2 => {
   const bendec = getBendec()
-  
+
+  const encoder = new TextEncoder()
+  const encode = encoder.encode.bind(encoder)
+
   const MSG_SIZE = bendec.getSize('Sample')
   const MSG_SIZE_WITH_HEADER = MSG_SIZE + Pool.MESSAGE_HEADER_SIZE
   const OVERLAP = MSG_SIZE_WITH_HEADER
@@ -27,10 +30,9 @@ test('shm iterator', async t2 => {
 
   const slices = range(1, 11).map(i => {
     const slice = pool.slice('Sample')
-    
-    bendec.encode({
-      foo: 'dupa jasiu'.split('').map(char => char.charCodeAt(0))
-    }, slice)
+    bendec.encodeAs({
+      foo: encode(`lorem ipsum ${i}`)
+    }, 'Sample', slice)
     return slice
   })
 
@@ -52,6 +54,9 @@ test('shm iterator', async t2 => {
         const result = [...iter]
 
         subSlice.forEach((buffer, i) => {
+          let decodedBuffer = bendec.decodeAs(result[i][1],'Sample')
+          decodedBuffer.foo = String.fromCharCode(...decodedBuffer.foo)
+          console.log(decodedBuffer)
           t.deepEquals(result[i][1], buffer)
         })
       })
