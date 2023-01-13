@@ -2,7 +2,6 @@ import { Readers, Writers, Bendec } from 'bendec'
 
 const types = [
   {
-    // "kind": "Primitive",
     "name": "u64",
     "size": 8,
   },
@@ -43,9 +42,11 @@ const getBendec = () => {
 }
 
 interface MemHeader {
-  header_size: bigint
-  data_offset: bigint
+  headerSize: bigint
+  dataOffset: bigint
   size: bigint
+  getBuffer: () => Buffer
+  setBuffer: (data: Buffer) => boolean
 }
 
-export { getBendec }
+export { MemHeader, getBendec }

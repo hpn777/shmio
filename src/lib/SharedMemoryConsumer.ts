@@ -1,19 +1,19 @@
 import { SharedMemory } from './SharedMemory'
-import { ShmItem, SharedMemoryIterator } from './SharedMemoryIterator'
+import { SharedMemoryIterator } from './SharedMemoryIterator'
 import { Observable, of, concat, interval } from 'rxjs'
 import { filter, map, share } from 'rxjs/operators'
-import { getBendec } from './memHeader'
+import { getBendec, MemHeader } from './memHeader'
 
 class SharedMemoryConsumer {
   private buffers: Buffer[]
   private dataOffset: number
-  private memHeaderWrapper: any
+  private memHeaderWrapper: MemHeader
 
   constructor(private sharedMemory: SharedMemory,) {
     this.buffers = sharedMemory.getBuffers()
 
     const mhBendec = getBendec()
-    this.memHeaderWrapper = mhBendec.getWrapper('MemHeader')
+    this.memHeaderWrapper = mhBendec.getWrapper('MemHeader') as MemHeader
     this.memHeaderWrapper.setBuffer(this.buffers[0])
     this.dataOffset = Number(this.memHeaderWrapper.dataOffset)
   }
@@ -21,7 +21,7 @@ class SharedMemoryConsumer {
   /**
    * Full stream of data with initial data and updates in one Observable
    */
-  public getAll(pollInterval: number = 10): Observable<Iterable<ShmItem>> {
+  public getAll(pollInterval: number = 10): Observable<Iterable<Buffer>> {
     let currentIndex = this.dataOffset
     const endIndex = Math.max(this.getSize(), this.dataOffset)
 

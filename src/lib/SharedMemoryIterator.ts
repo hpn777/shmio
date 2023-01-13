@@ -1,9 +1,8 @@
 import { SharedMemory } from './SharedMemory'
 
-type ShmItem = [number, Buffer, number]
 const MESSAGE_HEADER_SIZE = 2
 
-class SharedMemoryIterator implements Iterator<ShmItem> {
+class SharedMemoryIterator implements Iterator<Buffer> {
   // all buffers
   private buffers: Buffer[]
   // current buffer's index
@@ -66,18 +65,12 @@ class SharedMemoryIterator implements Iterator<ShmItem> {
         done: true,
       }
     }
-    let intIndex = this.index
     const size = this.currentBuffer.readUInt16LE(this.index)
     const item = {
-      value: [
-        this.buffersTotal + this.index,
-        this.currentBuffer.slice(
-          (this.index + MESSAGE_HEADER_SIZE),
-          this.index + size - MESSAGE_HEADER_SIZE
-        ),
-        size,
-        size,
-      ],
+      value: this.currentBuffer.slice(
+        (this.index + MESSAGE_HEADER_SIZE),
+        this.index + size - MESSAGE_HEADER_SIZE
+      ),
       done: false,
     }
 
@@ -102,4 +95,4 @@ const shmIter = (
   return new SharedMemoryIterator(sharedMemory, fromIndex, toIndex)
 }
 
-export { SharedMemoryIterator, ShmItem, shmIter }
+export { SharedMemoryIterator, shmIter }

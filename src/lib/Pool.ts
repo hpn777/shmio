@@ -1,10 +1,22 @@
 import assert from 'assert'
 import { Bendec, BufferWrapper } from 'bendec'
+import { SharedMemory } from './SharedMemory'
+import { getBendec, MemHeader } from './memHeader'
 
 // generic default
 // TODO: never default generic to any!
 // we need union from Bendec to be generated
 type PoolType = any
+
+/**
+ * each message is prepended by the header
+ * [u32][message]
+ * first 4 bytes - size of message
+ */
+const MESSAGE_HEADER_SIZE: number = 2
+
+const mhBendec = getBendec()
+
 
 /**
  * The size of the shared memory header
@@ -14,14 +26,7 @@ type PoolType = any
  * [x01, x02, x03, x04, x05, x06, x07, x08]
  *
  */
-const HEADER_SIZE: number = 8
-
-/**
- * each message is prepended by the header
- * [u32][message]
- * first 4 bytes - size of message
- */
-const MESSAGE_HEADER_SIZE: number = 2
+const HEADER_SIZE: number = mhBendec.getSize('MemHeader')
 
 /**
  * Buffer Pool
@@ -37,27 +42,9 @@ class Pool<T = PoolType> {
   public static readonly MESSAGE_HEADER_SIZE = MESSAGE_HEADER_SIZE
   public static readonly HEADER_SIZE = HEADER_SIZE
 
-  /**
-   * Create a Pool with provided Buffers
-   */
-  public static withBuffers<T>(
-    bendec: Bendec<T>,
-    buffers: Buffer[],
-    overlap: number,
-    restore: boolean = true
-  ) {
-    return new Pool(bendec, buffers, overlap, restore)
-  }
-
-  /**
-   * Create a Pool with fixed size Buffer
-   */
-  public static withSize<T>(bendec: Bendec<T>, size: number): Pool<T> {
-    return new Pool(bendec, [Buffer.alloc(size)], 0)
-  }
-
   public bendec: Bendec<T>
-
+  
+  private memHeaderWrapper: MemHeader
   // at start we're skipping the header size
   private index: number = HEADER_SIZE
   private bufferIndex: number = 0
@@ -65,8 +52,6 @@ class Pool<T = PoolType> {
   private currentBuffer: Buffer
   private buffers: Buffer[]
   private bufferLength: number
-  // the first header bytes
-  private sizeBuffer: Buffer
   // this is an overlap between pages
   private overlap: number
   private uncommittedSize: number = 0
@@ -74,38 +59,41 @@ class Pool<T = PoolType> {
   private currentSize: number = HEADER_SIZE
   private active: boolean = true
 
-  private constructor(
+  public constructor(
     bendec: Bendec<T>,
-    buffers: Buffer[],
-    overlap: number,
+    sharedMemory: SharedMemory,
     // if true we will rebuild this Pool from existing sharedMemory
     restore: boolean = true
   ) {
     this.bendec = bendec
-    this.buffers = buffers
-    this.overlap = overlap
-    this.bufferLength = buffers[0].length - overlap
-    this.sizeBuffer = this.buffers[0].slice(0, HEADER_SIZE)
+    this.buffers = sharedMemory.getBuffers()
+
+    this.memHeaderWrapper = mhBendec.getWrapper('MemHeader') as MemHeader
+    this.memHeaderWrapper.setBuffer(this.buffers[0])
+
+    this.overlap = sharedMemory.getConfig().overlap
+    this.bufferLength = this.buffers[0].length - this.overlap
     this.currentBuffer = this.buffers[0]
 
+    this.currentSize = Number(this.memHeaderWrapper.size)
+    if (this.currentSize === 0) {
+      this.memHeaderWrapper.headerSize = BigInt(HEADER_SIZE)
+      this.memHeaderWrapper.size = BigInt(HEADER_SIZE)
+      this.memHeaderWrapper.dataOffset = BigInt(HEADER_SIZE)
+      this.currentSize = HEADER_SIZE
+    }
     if (restore) {
-      this.currentSize =
-        this.buffers[0].readUInt32LE(0) +
-        this.buffers[0].readUInt32LE(4) * 0x100000000
-      if (this.currentSize === 0) {
-        this.currentSize = HEADER_SIZE
-      }
       this.index = this.currentSize % this.bufferLength
       this.bufferIndex = Math.floor(this.currentSize / this.bufferLength)
       this.currentBuffer = this.buffers[this.bufferIndex]
     }
 
-    assert(buffers[0].length >= 32, 'Buffers must be at least 32 bytes')
+    assert(this.buffers[0].length >= 32, 'Buffers must be at least 32 bytes')
 
     // Make sure all buffers have the same size
     assert(
-      buffers.reduce(
-        (r, buffer) => r && buffer.length === buffers[0].length,
+      this.buffers.reduce(
+        (r, buffer) => r && buffer.length === this.buffers[0].length,
         true
       ),
       'Buffers must be the same size'
@@ -120,9 +108,7 @@ class Pool<T = PoolType> {
   public commit() {
     this.currentSize += this.uncommittedSize
     this.uncommittedSize = 0
-    const big = ~~(this.currentSize / 0x0100000000)
-    this.sizeBuffer.writeUInt32LE(this.currentSize % 0x0100000000, 0)
-    this.sizeBuffer.writeUInt32LE(big, 4)
+    this.memHeaderWrapper.size = BigInt(this.currentSize)
   }
 
   /**
@@ -149,11 +135,13 @@ class Pool<T = PoolType> {
     )
 
     // write the actual size
-    this.currentBuffer.writeUInt32LE(size, this.index)
+    const sizeWithFrame = size + (2 * MESSAGE_HEADER_SIZE)
+    this.currentBuffer.writeUInt16LE(sizeWithFrame, this.index)
+    this.currentBuffer.writeUInt16LE(sizeWithFrame, this.index + MESSAGE_HEADER_SIZE + size)
 
-    this.index += MESSAGE_HEADER_SIZE + size
-    this.uncommittedSize += size + MESSAGE_HEADER_SIZE
-
+    this.index += sizeWithFrame
+    this.uncommittedSize += sizeWithFrame
+// console.log(this.uncommittedSize, this.bendec.getSize('Sample'))
     if (this.index >= this.bufferLength) {
       // update indexes
       this.index -= this.bufferLength
