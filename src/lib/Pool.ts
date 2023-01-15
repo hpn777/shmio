@@ -63,7 +63,6 @@ class Pool<T = PoolType> {
     bendec: Bendec<T>,
     sharedMemory: SharedMemory,
     // if true we will rebuild this Pool from existing sharedMemory
-    restore: boolean = true
   ) {
     this.bendec = bendec
     this.buffers = sharedMemory.getBuffers()
@@ -82,11 +81,10 @@ class Pool<T = PoolType> {
       this.memHeaderWrapper.dataOffset = BigInt(HEADER_SIZE)
       this.currentSize = HEADER_SIZE
     }
-    if (restore) {
-      this.index = this.currentSize % this.bufferLength
-      this.bufferIndex = Math.floor(this.currentSize / this.bufferLength)
-      this.currentBuffer = this.buffers[this.bufferIndex]
-    }
+
+    this.index = this.currentSize % this.bufferLength
+    this.bufferIndex = Math.floor(this.currentSize / this.bufferLength)
+    this.currentBuffer = this.buffers[this.bufferIndex]
 
     assert(this.buffers[0].length >= 32, 'Buffers must be at least 32 bytes')
 
@@ -141,7 +139,6 @@ class Pool<T = PoolType> {
 
     this.index += sizeWithFrame
     this.uncommittedSize += sizeWithFrame
-// console.log(this.uncommittedSize, this.bendec.getSize('Sample'))
     if (this.index >= this.bufferLength) {
       // update indexes
       this.index -= this.bufferLength
@@ -182,7 +179,7 @@ class Pool<T = PoolType> {
   }
 
   public isUsed(): boolean {
-    return this.currentSize > Pool.HEADER_SIZE
+    return this.currentSize > Number(this.memHeaderWrapper.dataOffset)
   }
 }
 
