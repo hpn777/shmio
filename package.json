@@ -1,15 +1,15 @@
 {
   "name": "shmio",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Rafal Okninski <hpn777@gmail.com>",
   "description": "SHM IO project",
   "main": "./src/lib/index.js",
   "typings": "./src/lib/index.d.ts",
   "gypfile": true,
   "dependencies": {
-    "node-addon-api": "7.0.0",
     "bendec": "0.51.0",
     "lodash": "4.17.21",
+    "node-addon-api": "^7.0.0",
     "rxjs": "7.5.6"
   },
   "scripts": {
