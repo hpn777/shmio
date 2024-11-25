@@ -1,6 +1,6 @@
 {
   "name": "shmio",
-  "version": "0.2.2",
+  "version": "0.2.7",
   "author": "Rafal Okninski <hpn777@gmail.com>",
   "description": "SHM IO project",
   "main": "./src/lib/index.js",
@@ -9,10 +9,11 @@
   "dependencies": {
     "bendec": "0.51.0",
     "lodash": "4.17.21",
-    "node-addon-api": "^7.0.0",
+    "node-addon-api": "^7.1.1",
     "rxjs": "7.5.6"
   },
   "scripts": {
+    "preinstall": "npm i node-addon-api",
     "test": "node ./dist/tests/",
     "build": "npx tsc",
     "watch": "npx tsc --watch"

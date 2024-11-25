@@ -25,8 +25,12 @@
         "cflags_cc": [ "<@(cflags_cc)" ],
         "include_dirs" : [
           "<!(node -p \"require('node-addon-api').include\")",
-          "node_modules/node-addon-api"
-        ],
+          "../node_modules/node-addon-api",                                                    
+          "node_modules/node-addon-api",                                                       
+          "/usr/include/node",                                                                 
+          "/usr/local/include/node",                                                           
+        ],                                                                                       
+        "dependencies": ["<!(node -p \"require('node-addon-api').gyp\")"],
         "conditions": [
           [
             'OS == "mac"', {
