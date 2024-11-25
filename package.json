@@ -1,6 +1,6 @@
 {
   "name": "shmio",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "author": "Rafal Okninski <hpn777@gmail.com>",
   "description": "SHM IO project",
   "main": "./src/lib/index.js",
@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@types/lodash": "4.14.182",
-    "@types/node": "18.0.0",
+    "@types/node": "22.0.0",
     "@types/tape": "4.13.2",
     "node-gyp": "9.4.0",
     "tape": "4.9.1",
