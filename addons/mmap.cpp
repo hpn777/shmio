@@ -34,9 +34,8 @@ Napi::Value setup(const Napi::CallbackInfo& info) {
 
   Napi::Array nodeBuffersArray = Napi::Array::New(env, num);
   for (size_t i = 0; i < num; i++) {
-
-    (
-      nodeBuffersArray).Set(i,
+    nodeBuffersArray.Set(
+      i,
       Napi::Buffer<char>::New(env, buf + i * size, size + overlap)
     );
   }
