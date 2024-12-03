@@ -1,9 +1,9 @@
 {
   "name": "shmio",
-  "version": "0.2.9",
+  "version": "0.2.15",
   "author": "Rafal Okninski <hpn777@gmail.com>",
   "description": "SHM IO project",
-  "main": "./src/lib/index.js",
+  "main": "./dist/lib/index.js",
   "typings": "./src/lib/index.d.ts",
   "gypfile": true,
   "dependencies": {
@@ -14,8 +14,9 @@
   },
   "scripts": {
     "preinstall": "npm i node-addon-api",
+    "install": "npx tsc; node-gyp rebuild",
     "test": "node ./dist/tests/",
-    "build": "npx tsc",
+    "build": "npx tsc; npx node-gyp rebuild",
     "watch": "npx tsc --watch"
   },
   "devDependencies": {
@@ -24,7 +25,7 @@
     "@types/tape": "4.13.2",
     "node-gyp": "9.4.0",
     "tape": "4.9.1",
-    "typescript": "4.7.4"
+    "typescript": "^4.7.4"
   },
   "repository": {
     "type": "git",
