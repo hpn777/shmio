@@ -1,6 +1,6 @@
 {
   "name": "shmio",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "author": "Rafal Okninski <hpn777@gmail.com>",
   "description": "SHM IO project",
   "main": "./dist/lib/index.js",
@@ -14,7 +14,7 @@
   },
   "scripts": {
     "preinstall": "npm i node-addon-api",
-    "install": "npx tsc; node-gyp rebuild",
+    "install": "node-gyp rebuild",
     "test": "node ./dist/tests/",
     "build": "npx tsc; npx node-gyp rebuild",
     "watch": "npx tsc --watch"
