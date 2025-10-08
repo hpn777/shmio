@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <iostream>
+#include <cstring>
 #include <sys/mman.h>
 #include <napi.h>
 #include <uv.h>
@@ -7,7 +8,13 @@ using namespace Napi;
 
 /**
  * Make a shared memory object or file mapping and expose it to JS as Buffer
- * The memory pages will be overlapping by 2048
+ * The memory pages will be overlapping to allow reading data that spans buffer boundaries
+ *
+ * Memory layout:
+ *   Buffer 0: [0, size + overlap)
+ *   Buffer 1: [size, 2*size + overlap)
+ *   ...
+ *   Buffer N-1: [size*(N-1), size*N)  <- Last buffer has NO overlap to prevent out-of-bounds
  *
  * TODO: fix double free error on exit
  *       there is a node.AtExit but doesn't seem to work
@@ -24,19 +31,23 @@ Napi::Value setup(const Napi::CallbackInfo& info) {
   const int flags = info[4].As<Napi::Number>().Uint32Value();
   const int fd = info[5].As<Napi::Number>().Uint32Value();
 
+  // Allocate size*num (not size*num+overlap) to match file size
   char* buf = (char*) mmap(0, size * num, protection, flags, fd, 0);
 
   if (buf == MAP_FAILED) {
-    std::cout << "mapping failed, errno: " << errno << "\n";
-    std::cout << "http://man7.org/linux/man-pages/man2/mmap.2.html#ERRORS\n";
-    return Napi::Number::New(env, 0);
+    Napi::Error::New(env, std::string("mmap failed: ") + strerror(errno) + 
+                     " (see http://man7.org/linux/man-pages/man2/mmap.2.html#ERRORS)")
+      .ThrowAsJavaScriptException();
+    return env.Null();
   }
 
   Napi::Array nodeBuffersArray = Napi::Array::New(env, num);
   for (size_t i = 0; i < num; i++) {
+    // Last buffer gets no overlap to prevent out-of-bounds access
+    size_t buffer_size = (i == num - 1) ? size : size + overlap;
     nodeBuffersArray.Set(
       i,
-      Napi::Buffer<char>::New(env, buf + i * size, size + overlap)
+      Napi::Buffer<char>::New(env, buf + i * size, buffer_size)
     );
   }
 

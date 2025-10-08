@@ -58,6 +58,8 @@ class Pool<T = PoolType> {
   // current size of the shared memory
   private currentSize: number = HEADER_SIZE
   private active: boolean = true
+  // debug mode: validate frame integrity (zero production overhead when disabled)
+  private readonly debugMode: boolean = process.env.SHMIO_DEBUG === 'true'
 
   public constructor(
     bendec: Bendec<T>,
@@ -88,13 +90,16 @@ class Pool<T = PoolType> {
 
     assert(this.buffers[0].length >= 32, 'Buffers must be at least 32 bytes')
 
-    // Make sure all buffers have the same size
+    // Make sure all buffers have the same size, except the last one (no overlap to prevent out-of-bounds)
     assert(
       this.buffers.reduce(
-        (r, buffer) => r && buffer.length === this.buffers[0].length,
+        (r, buffer, i) => r && (
+          buffer.length === this.buffers[0].length || 
+          i === this.buffers.length - 1  // Last buffer may be smaller (no overlap)
+        ),
         true
       ),
-      'Buffers must be the same size'
+      'Buffers must be the same size (except last buffer which has no overlap)'
     )
   }
 
@@ -102,11 +107,16 @@ class Pool<T = PoolType> {
    * Commiting shared memory means updating the size of the memory file and
    * should only be done if everything has been written into the buffer
    * Our shared memory readers will check for this value to change
+   * 
+   * Note: Write to shared memory first to ensure readers see consistent state
    */
   public commit() {
-    this.currentSize += this.uncommittedSize
+    const newSize = this.currentSize + this.uncommittedSize
+    // Write to shared memory header FIRST (atomic for readers)
+    this.memHeaderWrapper.size = BigInt(newSize)
+    // Then update local state
+    this.currentSize = newSize
     this.uncommittedSize = 0
-    this.memHeaderWrapper.size = BigInt(this.currentSize)
   }
 
   /**
@@ -126,14 +136,56 @@ class Pool<T = PoolType> {
       return Buffer.alloc(size)
     }
 
+    const sizeWithFrame = size + (2 * MESSAGE_HEADER_SIZE)
+    
+    // Bounds check: ensure we don't overflow shared memory (minimal overhead)
+    if (this.index + sizeWithFrame >= this.bufferLength) {
+      // Check if we can move to next buffer
+      if (this.bufferIndex >= this.buffers.length - 1) {
+        throw new Error(`Shared memory exhausted: cannot allocate ${size} bytes (buffer ${this.bufferIndex}/${this.buffers.length}, index ${this.index}/${this.bufferLength})`)
+      }
+    }
+
+    // Debug mode: validate previous frame integrity (zero production overhead)
+    if (this.debugMode) {
+      // Only validate if we're past the header and have written at least one frame
+      const absolutePosition = this.bufferIndex * this.bufferLength + this.index
+      const minValidationPosition = HEADER_SIZE + MESSAGE_HEADER_SIZE * 2
+      
+      if (absolutePosition >= minValidationPosition && this.index >= MESSAGE_HEADER_SIZE * 2) {
+        const prevTrailingOffset = this.index - MESSAGE_HEADER_SIZE
+        const prevTrailingSize = this.currentBuffer.readUInt16LE(prevTrailingOffset)
+        
+        // Sanity check: frame size must be reasonable
+        if (prevTrailingSize < MESSAGE_HEADER_SIZE * 2 || prevTrailingSize > this.bufferLength) {
+          throw new Error(
+            `[DEBUG] Invalid frame size ${prevTrailingSize} at offset ${prevTrailingOffset} ` +
+            `(buffer ${this.bufferIndex}, absolute position ${absolutePosition}, ` +
+            `must be between ${MESSAGE_HEADER_SIZE * 2} and ${this.bufferLength})`
+          )
+        }
+        
+        const prevLeadingOffset = this.index - prevTrailingSize
+        if (prevLeadingOffset >= 0) {
+          const prevLeadingSize = this.currentBuffer.readUInt16LE(prevLeadingOffset)
+          
+          if (prevLeadingSize !== prevTrailingSize) {
+            throw new Error(
+              `[DEBUG] Frame corruption detected: leading size ${prevLeadingSize} != trailing size ${prevTrailingSize} ` +
+              `at offset ${prevLeadingOffset}-${this.index} (buffer ${this.bufferIndex}, absolute position ${absolutePosition})`
+            )
+          }
+        }
+      }
+    }
+
     // get the slice
     const buffer = this.currentBuffer.slice(
       this.index + MESSAGE_HEADER_SIZE,
       this.index + MESSAGE_HEADER_SIZE + size
     )
 
-    // write the actual size
-    const sizeWithFrame = size + (2 * MESSAGE_HEADER_SIZE)
+    // write the actual size (symmetric frame for backward iteration)
     this.currentBuffer.writeUInt16LE(sizeWithFrame, this.index)
     this.currentBuffer.writeUInt16LE(sizeWithFrame, this.index + MESSAGE_HEADER_SIZE + size)
 

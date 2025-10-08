@@ -75,7 +75,8 @@ class SharedMemory {
       }
 
       fd = openSync(config.path, O_RDWR | O_CREAT, permissions)
-      // only truncate if new
+      // only truncate if new - size matches mmap allocation (size * num)
+      // Note: overlap is handled within buffers, not in file size
       ftruncateSync(fd, config.size * config.num)
     }
 

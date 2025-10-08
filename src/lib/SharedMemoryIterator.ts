@@ -24,6 +24,9 @@ class SharedMemoryIterator implements Iterator<Buffer> {
   // this is calculated at the time of instantination
   private totalSize: number
 
+  // debug mode: validate frame integrity (zero production overhead when disabled)
+  private readonly debugMode: boolean = process.env.SHMIO_DEBUG === 'true'
+
   constructor(
     private sharedMemory: SharedMemory,
     fromIndex: number,
@@ -66,6 +69,27 @@ class SharedMemoryIterator implements Iterator<Buffer> {
       }
     }
     const size = this.currentBuffer.readUInt16LE(this.index)
+    
+    // Debug mode: validate frame integrity
+    if (this.debugMode) {
+      // Sanity check: frame size must be reasonable
+      if (size < MESSAGE_HEADER_SIZE * 2 || size > this.bufferLength) {
+        throw new Error(
+          `[DEBUG] Invalid frame size ${size} at offset ${this.buffersTotal + this.index} ` +
+          `(buffer ${this.bufferIndex}, must be between ${MESSAGE_HEADER_SIZE * 2} and ${this.bufferLength})`
+        )
+      }
+      
+      // Validate symmetric frame: trailing size must match leading size
+      const trailingSize = this.currentBuffer.readUInt16LE(this.index + size - MESSAGE_HEADER_SIZE)
+      if (size !== trailingSize) {
+        throw new Error(
+          `[DEBUG] Frame corruption in iterator: leading size ${size} != trailing size ${trailingSize} ` +
+          `at offset ${this.buffersTotal + this.index} (buffer ${this.bufferIndex})`
+        )
+      }
+    }
+    
     const item = {
       value: this.currentBuffer.slice(
         (this.index + MESSAGE_HEADER_SIZE),
