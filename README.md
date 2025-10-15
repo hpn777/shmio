@@ -127,34 +127,6 @@ When the log is writable, `log.writer` exposes:
 - `commit()` &mdash; atomically publishes all allocated frames since the previous commit.
 - `close()` &mdash; releases writer resources.
 
-See the [Claude Sonet agent documentation](docs/claude-sonet-agent.md) for a complete example using `nextBatch` and live batching policies.
-
-## Claude Sonet Agent
-
-`shmio` ships with an optional Claude Sonet agent that consumes shared-log frames via the native iterator, enforces batching/TTL policies, and forwards prompts to Claude Sonet with rich metrics. Use the helper factory to wire it up:
-
-```typescript
-import { createSharedLog } from 'shmio'
-import { createClaudeSonetAgent } from 'shmio/dist/agent'
-
-const sharedLog = createSharedLog({
-  path: '/dev/shm/sonet-log',
-  capacityBytes: 32n * 1024n * 1024n,
-  writable: false,
-})
-
-const agent = createClaudeSonetAgent({
-  sharedLog,
-  model: 'claude-3-5-sonet',
-  decoder: buffer => ({ ok: true, frame: { payload: JSON.parse(buffer.toString()), raw: buffer } }),
-  claudeClient: { sendPrompt: async input => ({ requestId: 'demo', latencyMs: 0, raw: null }) },
-})
-
-agent.start()
-```
-
-Configuration details, metrics, and rollout guidance live in [docs/claude-sonet-agent.md](docs/claude-sonet-agent.md).
-
 ## Architecture
 
 ### Frame Structure
