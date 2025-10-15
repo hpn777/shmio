@@ -157,20 +157,6 @@ Configuration details, metrics, and rollout guidance live in [docs/claude-sonet-
 
 ## Architecture
 
-### Buffer Overlap
-
-JavaScript has buffer size limitations (~1GB). shmio overcomes this by creating multiple overlapping buffers:
-
-```
-Buffer 0: [0 ................ size]
-                    [overlap]
-Buffer 1:         [size ................ 2*size]
-                            [overlap]
-Buffer 2:                  [2*size ................ 3*size]
-```
-
-Messages that span buffer boundaries are guaranteed to fit completely in at least one buffer due to the overlap.
-
 ### Frame Structure
 
 Each message has symmetric headers for bidirectional iteration:
@@ -450,20 +436,6 @@ try {
 ## License
 
 MIT
-
-## Contributing
-
-Contributions welcome! Please ensure:
-- All tests pass: `npm test && SHMIO_DEBUG=true npm test`
-- Code follows existing style
-- Add tests for new features
-- Update documentation
-
-## Documentation
-
-- [FIXES.md](FIXES.md) - Recent bug fixes and improvements
-- [DEBUG.md](DEBUG.md) - Debug mode documentation
-- [VALIDATION_SUMMARY.md](VALIDATION_SUMMARY.md) - Code validation results
 
 ## Author
 
