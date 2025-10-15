@@ -95,7 +95,7 @@ Creates (or opens) a memory-mapped append-only log. Options:
 ```typescript
 createSharedLog({
   path: string,                   // File path (/dev/shm/name for shared memory)
-  capacityBytes: number | bigint, // Total file size, including overlap + header
+  capacityBytes: number | bigint, // Desired file size when creating; existing files reuse their current size
   writable: boolean,              // Enable writer support
   debugChecks?: boolean,          // Optional integrity checks for writer + iterator
 })

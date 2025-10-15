@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <string>
+#include <limits>
 
 #include "shm_iterator.h"
 #include "shm_writer.h"
@@ -111,6 +112,8 @@ ShmMapping::ShmMapping(const Napi::CallbackInfo& info)
   int flags = writable_ ? (O_RDWR) : O_RDONLY;
   int permissions = 0664;
 
+  bool created = false;
+
   fd_ = open(path.c_str(), flags, permissions);
   if (fd_ < 0) {
     if (!writable_) {
@@ -124,6 +127,8 @@ ShmMapping::ShmMapping(const Napi::CallbackInfo& info)
       return;
     }
 
+    created = true;
+
     if (ftruncate(fd_, static_cast<off_t>(capacityBytes)) != 0) {
       Napi::Error::New(env, std::string("ftruncate failed: ") + strerror(errno)).ThrowAsJavaScriptException();
       close(fd_);
@@ -132,8 +137,42 @@ ShmMapping::ShmMapping(const Napi::CallbackInfo& info)
     }
   }
 
+  struct stat st {};
+  if (fstat(fd_, &st) != 0) {
+    Napi::Error::New(env, std::string("fstat failed: ") + strerror(errno)).ThrowAsJavaScriptException();
+    close(fd_);
+    fd_ = -1;
+    return;
+  }
+
+  if (st.st_size < static_cast<off_t>(kDefaultHeaderSize)) {
+    if (created) {
+      st.st_size = static_cast<off_t>(capacityBytes);
+    } else {
+      Napi::Error::New(env, "shared memory segment is smaller than minimum header size").ThrowAsJavaScriptException();
+      close(fd_);
+      fd_ = -1;
+      return;
+    }
+  }
+
+  if (st.st_size <= 0) {
+    Napi::Error::New(env, "shared memory segment has zero length").ThrowAsJavaScriptException();
+    close(fd_);
+    fd_ = -1;
+    return;
+  }
+
+  uint64_t mappingLength = static_cast<uint64_t>(st.st_size);
+  if (mappingLength > std::numeric_limits<size_t>::max()) {
+    Napi::Error::New(env, "shared memory segment is too large to map").ThrowAsJavaScriptException();
+    close(fd_);
+    fd_ = -1;
+    return;
+  }
+
   int protection = writable_ ? (PROT_READ | PROT_WRITE) : PROT_READ;
-  void* mapped = mmap(nullptr, capacityBytes, protection, MAP_SHARED, fd_, 0);
+  void* mapped = mmap(nullptr, static_cast<size_t>(mappingLength), protection, MAP_SHARED, fd_, 0);
   if (mapped == MAP_FAILED) {
     Napi::Error::New(env, std::string("mmap failed: ") + strerror(errno)).ThrowAsJavaScriptException();
     close(fd_);
@@ -142,7 +181,7 @@ ShmMapping::ShmMapping(const Napi::CallbackInfo& info)
   }
 
   base_ = static_cast<uint8_t*>(mapped);
-  length_ = capacityBytes;
+  length_ = static_cast<size_t>(mappingLength);
 
   mappingBufferRef_ = Napi::Persistent(Napi::Buffer<uint8_t>::New(env, base_, length_));
   mappingBufferRef_.SuppressDestruct();
