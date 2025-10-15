@@ -21,7 +21,7 @@
       "msvs_settings": {
         "VCCLCompilerTool": { "ExceptionHandling": 1 },
       },
-        "sources": [ "./addons/mmap.cpp" ],
+  "sources": [ "./addons/mmap.cpp", "./addons/shm_iterator.cpp", "./addons/shm_mapping.cpp", "./addons/shm_writer.cpp" ],
         "cflags_cc": [ "<@(cflags_cc)" ],
         "include_dirs" : [
           "<!(node -p \"require('node-addon-api').include\")",

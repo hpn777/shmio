@@ -7,10 +7,12 @@ High-performance shared memory library for Node.js with append-only log semantic
 - Memory-mapped files with automatic buffer management
 - Append-only log with atomic commits
 - Symmetric frame headers for bidirectional iteration
-- Zero-copy buffer slicing
-- Multi-process reader support (single writer)
-- Debug mode for development with zero production overhead
+- Zero-copy frame access and mutation
+- Native N-API iterator with configurable batch reads
+- Single writer / multi-reader concurrency model
+- Optional debug checks with zero production overhead
 - TypeScript support with full type definitions
+- Built-in Claude Sonet agent for low-latency prompt dispatching
 
 ## Installation
 
@@ -22,130 +24,136 @@ npm install shmio
 
 ### Writer Process
 
-```javascript
-const { SharedMemory, Pool } = require('shmio')
-const { Bendec } = require('bendec')
+```typescript
+import { createSharedLog } from 'shmio'
+import { Bendec } from 'bendec'
 
-// Define your message schema
-const types = [{
-  name: 'LogEvent',
-  fields: [
-    { name: 'timestamp', type: 'u64' },
-    { name: 'level', type: 'u8' },
-    { name: 'message', type: 'string' }
-  ]
-}]
-
-const bendec = new Bendec({ types })
-
-// Create shared memory
-const shm = new SharedMemory({
-  path: '/dev/shm/myapp-events',  // Use /dev/shm for true shared memory
-  size: 1024 * 1024,              // 1MB per buffer
-  num: 10,                         // 10 buffers = 10MB total
-  overlap: 4096,                   // 4KB overlap between buffers
-  writable: true
+const bendec = new Bendec({
+  types: [{
+    name: 'LogEvent',
+    fields: [
+      { name: 'timestamp', type: 'u64' },
+      { name: 'level', type: 'u8' },
+      { name: 'message', type: 'string' },
+    ],
+  }],
 })
 
-// Create pool for writing
-const pool = new Pool(bendec, shm)
+const log = createSharedLog({
+  path: '/dev/shm/myapp-events',
+  capacityBytes: 16n * 1024n * 1024n, // 16 MiB
+  writable: true,
+  debugChecks: process.env.SHMIO_DEBUG === 'true',
+})
 
-// Write events
-const event = pool.wrap('LogEvent')
-event.timestamp = BigInt(Date.now())
-event.level = 1
-event.message = 'Application started'
+const writer = log.writer!
 
-// Commit to make visible to readers
-pool.commit()
+const frameSize = bendec.getSize('LogEvent')
+const frame = writer.allocate(frameSize)
+bendec.encodeAs({
+  timestamp: BigInt(Date.now()),
+  level: 1,
+  message: 'Application started',
+}, 'LogEvent', frame)
+
+writer.commit()
+log.close()
 ```
 
 ### Reader Process
 
-```javascript
-const { SharedMemory, SharedMemoryConsumer } = require('shmio')
+```typescript
+import { createSharedLog } from 'shmio'
+import { Bendec } from 'bendec'
 
-// Open shared memory (read-only)
-const shm = new SharedMemory({
+const bendec = new Bendec({ /* same schema as writer */ })
+
+const log = createSharedLog({
   path: '/dev/shm/myapp-events',
-  size: 1024 * 1024,
-  num: 10,
-  overlap: 4096,
-  writable: false  // Read-only
+  capacityBytes: 16n * 1024n * 1024n,
+  writable: false,
 })
 
-// Create consumer
-const consumer = new SharedMemoryConsumer(shm)
+const iterator = log.createIterator()
 
-// Stream all events (past and future)
-consumer.getAll(10).subscribe(iterator => {
-  for (const buffer of iterator) {
-    const event = bendec.decodeAs(buffer, 'LogEvent')
-    console.log(event)
-  }
-})
+const batch = iterator.nextBatch({ maxMessages: 32 })
+for (const buffer of batch) {
+  const event = bendec.decodeAs(buffer, 'LogEvent')
+  console.log(event)
+}
+
+iterator.close()
+log.close()
 ```
 
 ## API
 
-### SharedMemory
+### `createSharedLog(options)`
 
-Creates a memory-mapped file or shared memory region.
+Creates (or opens) a memory-mapped append-only log. Options:
 
-```javascript
-new SharedMemory({
-  path: string,      // File path (/dev/shm/name for shared memory)
-  size: number,      // Size of each buffer in bytes
-  num: number,       // Number of buffers
-  overlap: number,   // Overlap between buffers in bytes
-  writable: boolean  // Open for writing (creates if needed)
+```typescript
+createSharedLog({
+  path: string,                   // File path (/dev/shm/name for shared memory)
+  capacityBytes: number | bigint, // Total file size, including overlap + header
+  writable: boolean,              // Enable writer support
+  debugChecks?: boolean,          // Optional integrity checks for writer + iterator
 })
 ```
 
-**Methods:**
-- `getBuffers()` - Returns array of Buffer objects
-- `getConfig()` - Returns configuration object
+Returns a `SharedLog` with:
 
-### Pool
+- `header` &mdash; a mutable Bendec wrapper exposing `headerSize`, `dataOffset`, and the current `size` cursor.
+- `createIterator(options?)` &mdash; opens a new native iterator. Pass `{ startCursor: bigint }` to resume from a stored position.
+- `writer` &mdash; available when `writable: true`. Use it to append frames atomically.
+- `close()` &mdash; release the underlying file descriptor and mapping.
 
-Manages buffer allocation with automatic overflow handling.
+### `ShmIterator`
 
-```javascript
-new Pool(bendec, sharedMemory)
+Native iterator instances returned by `createIterator()` expose:
+
+- `next()` &mdash; returns the next frame as a `Buffer`, or `null` when no new data is committed.
+- `nextBatch({ maxMessages, maxBytes, debugChecks })` &mdash; pulls multiple frames in one call.
+- `cursor()` &mdash; current read cursor (as `bigint`). Persist this to resume later.
+- `committedSize()` &mdash; total number of committed bytes visible to readers.
+- `seek(position)` &mdash; jump to an absolute cursor position.
+- `close()` &mdash; release underlying native resources.
+
+### `ShmWriter`
+
+When the log is writable, `log.writer` exposes:
+
+- `allocate(size, { debugChecks })` &mdash; reserves a frame buffer for writing.
+- `commit()` &mdash; atomically publishes all allocated frames since the previous commit.
+- `close()` &mdash; releases writer resources.
+
+See the [Claude Sonet agent documentation](docs/claude-sonet-agent.md) for a complete example using `nextBatch` and live batching policies.
+
+## Claude Sonet Agent
+
+`shmio` ships with an optional Claude Sonet agent that consumes shared-log frames via the native iterator, enforces batching/TTL policies, and forwards prompts to Claude Sonet with rich metrics. Use the helper factory to wire it up:
+
+```typescript
+import { createSharedLog } from 'shmio'
+import { createClaudeSonetAgent } from 'shmio/dist/agent'
+
+const sharedLog = createSharedLog({
+  path: '/dev/shm/sonet-log',
+  capacityBytes: 32n * 1024n * 1024n,
+  writable: false,
+})
+
+const agent = createClaudeSonetAgent({
+  sharedLog,
+  model: 'claude-3-5-sonet',
+  decoder: buffer => ({ ok: true, frame: { payload: JSON.parse(buffer.toString()), raw: buffer } }),
+  claudeClient: { sendPrompt: async input => ({ requestId: 'demo', latencyMs: 0, raw: null }) },
+})
+
+agent.start()
 ```
 
-**Methods:**
-- `slice(typeName)` - Allocate buffer for a specific type
-- `sliceSize(bytes)` - Allocate buffer of specific size
-- `wrap(typeName)` - Allocate and wrap in Bendec wrapper
-- `commit()` - Atomically commit all writes (makes them visible to readers)
-- `getSize()` - Returns `[committedSize, uncommittedSize]`
-- `getStatus()` - Returns `[bufferIndex, byteOffset]`
-- `setActive(boolean)` - Enable/disable buffer pooling
-
-### SharedMemoryConsumer
-
-Reads events from shared memory with optional streaming.
-
-```javascript
-new SharedMemoryConsumer(sharedMemory)
-```
-
-**Methods:**
-- `getData(fromIndex?)` - Returns iterator for range
-- `getAll(pollInterval?)` - Returns Observable that emits iterators (requires RxJS)
-
-### SharedMemoryIterator
-
-Iterator for reading events sequentially.
-
-```javascript
-const iterator = new SharedMemoryIterator(sharedMemory, fromIndex, toIndex)
-
-for (const buffer of iterator) {
-  // Process buffer
-}
-```
+Configuration details, metrics, and rollout guidance live in [docs/claude-sonet-agent.md](docs/claude-sonet-agent.md).
 
 ## Architecture
 
@@ -201,13 +209,14 @@ Both size fields contain the total frame size (N + 4 bytes). This enables:
 
 **Single Writer, Multiple Readers**
 
-- ONE writer process can call `commit()` - Multiple writers will corrupt data
-- MULTIPLE reader processes can read concurrently - Safe with atomic size updates
-- NO explicit locking - Relies on atomic 64-bit writes on x86/x64
+- ONE writer process can call `writer.commit()` &mdash; multiple writers will corrupt data
+- MULTIPLE reader processes can read concurrently via independent iterators
+- NO explicit locking &mdash; relies on atomic 64-bit writes on x86/x64
 
 Writers must:
-1. Write all event data
-2. Call `commit()` to make events visible atomically
+1. Allocate a frame with `writer.allocate(size)`
+2. Encode the frame payload (e.g., via Bendec)
+3. Call `writer.commit()` to make events visible atomically
 
 Readers see:
 - Consistent snapshots (all events up to last commit)
@@ -240,66 +249,86 @@ See [DEBUG.md](DEBUG.md) for complete documentation.
 
 Perfect for append-only event logs:
 
-```javascript
+```typescript
 // Writer: Event producer
-const pool = new Pool(bendec, shm)
+const path = '/dev/shm/event-log'
+const bendec = createEventBendec() // your Bendec schema helper
+const writerLog = createSharedLog({ path, capacityBytes: 64n * 1024n * 1024n, writable: true })
+const messageSize = bendec.getSize('Event')
 
-function recordEvent(type, data) {
-  const event = pool.wrap('Event')
-  event.type = type
-  event.timestamp = BigInt(Date.now())
-  event.data = data
-  pool.commit()  // Atomic commit
+function recordEvent(type: string, data: Buffer) {
+  const frame = writerLog.writer!.allocate(messageSize)
+  bendec.encodeAs({
+    type,
+    timestamp: BigInt(Date.now()),
+    data,
+  }, 'Event', frame)
+  writerLog.writer!.commit()
 }
 
 // Reader: Event consumer
-consumer.getAll(10).subscribe(iterator => {
-  for (const buffer of iterator) {
-    const event = bendec.decodeAs(buffer, 'Event')
-    processEvent(event)
-  }
-})
+const readerLog = createSharedLog({ path, capacityBytes: 64n * 1024n * 1024n, writable: false })
+const iterator = readerLog.createIterator()
+for (const buffer of iterator.nextBatch({ maxMessages: 32 })) {
+  const event = bendec.decodeAs(buffer, 'Event')
+  processEvent(event)
+}
 ```
 
 ### System Monitoring
 
 Real-time log streaming between processes:
 
-```javascript
+```typescript
 // Logger process
-function log(level, message) {
-  const entry = pool.wrap('LogEntry')
-  entry.timestamp = BigInt(Date.now())
-  entry.level = level
-  entry.message = message
-  pool.commit()
+const path = '/dev/shm/log-stream'
+const bendec = createLogBendec()
+const writerLog = createSharedLog({ path, capacityBytes: 32n * 1024n * 1024n, writable: true })
+const writer = writerLog.writer!
+
+function logEntry(level: number, message: string) {
+  const frame = writer.allocate(bendec.getSize('LogEntry'))
+  bendec.encodeAs({
+    timestamp: BigInt(Date.now()),
+    level,
+    message,
+  }, 'LogEntry', frame)
+  writer.commit()
 }
 
 // Monitor process
-consumer.getAll(100).subscribe(iterator => {
-  for (const buffer of iterator) {
-    const entry = bendec.decodeAs(buffer, 'LogEntry')
-    console.log(`[${entry.level}] ${entry.message}`)
-  }
-})
+const readerLog = createSharedLog({ path, capacityBytes: 32n * 1024n * 1024n, writable: false })
+const iterator = readerLog.createIterator()
+for (const buffer of iterator.nextBatch({ maxMessages: 100 })) {
+  const entry = bendec.decodeAs(buffer, 'LogEntry')
+  console.log(`[${entry.level}] ${entry.message}`)
+}
 ```
 
 ### Inter-Process Communication
 
 High-speed message passing:
 
-```javascript
+```typescript
 // Producer
+const path = '/dev/shm/ipc-channel'
+const bendec = createMessageBendec()
+const producerLog = createSharedLog({ path, capacityBytes: 8n * 1024n * 1024n, writable: true })
+const writer = producerLog.writer!
+
 for (let i = 0; i < 1000; i++) {
-  const msg = pool.wrap('Message')
-  msg.id = i
-  msg.payload = generateData()
+  const frame = writer.allocate(bendec.getSize('Message'))
+  bendec.encodeAs({
+    id: i,
+    payload: generateData(),
+  }, 'Message', frame)
 }
-pool.commit()  // Batch commit for performance
+writer.commit()  // Batch commit for performance
 
 // Consumer
-const data = consumer.getData()
-for (const buffer of data) {
+const consumerLog = createSharedLog({ path, capacityBytes: 8n * 1024n * 1024n, writable: false })
+const iterator = consumerLog.createIterator()
+for (const buffer of iterator.nextBatch()) {
   const msg = bendec.decodeAs(buffer, 'Message')
   process(msg)
 }
@@ -325,15 +354,16 @@ On modern hardware (Intel i7, NVMe SSD):
 
 ## Error Handling
 
-```javascript
+```typescript
 try {
-  const event = pool.wrap('Event')
+  const frame = log.writer!.allocate(bendec.getSize('Event'))
   // ... write event data
-  pool.commit()
+  log.writer!.commit()
 } catch (err) {
-  if (err.message.includes('Shared memory exhausted')) {
+  const message = err instanceof Error ? err.message : String(err)
+  if (message.includes('Shared memory exhausted')) {
     // Handle memory full - rotate files or wait for readers
-  } else if (err.message.includes('[DEBUG]')) {
+  } else if (message.includes('ERR_SHM_FRAME_CORRUPT')) {
     // Debug mode caught corruption
   } else {
     // Other errors
@@ -378,10 +408,11 @@ SHMIO_DEBUG=true npm test
 
 Increase buffer size or number of buffers:
 
-```javascript
-const shm = new SharedMemory({
-  size: 2 * 1024 * 1024,  // 2MB instead of 1MB
-  num: 20                  // 20 buffers instead of 10
+```typescript
+const log = createSharedLog({
+  path: '/dev/shm/myapp-events',
+  capacityBytes: 32n * 1024n * 1024n,
+  writable: true,
 })
 ```
 

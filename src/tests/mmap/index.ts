@@ -1,107 +1,92 @@
 import fs from 'fs'
 import test from 'tape'
-import { SharedMemory } from '../../lib/SharedMemory'
+import { createSharedLog } from '../../lib/SharedLog'
 
-test('Shared memory file is written in /dev/shm', t => {
-  const path = '/dev/shm/test'
-  const size = 8
-  const num = 4
+const writeFrame = (logPath: string) => {
+  const log = createSharedLog({
+    path: logPath,
+    capacityBytes: 64,
+    writable: true,
+  })
 
+  if (!log.writer) {
+    throw new Error('Expected writable shared log to expose a writer')
+  }
+
+  const payload = Buffer.from('hello', 'utf8')
+  const slice = log.writer.allocate(payload.length)
+  slice.set(payload)
+  log.writer.commit()
+  log.close()
+
+  const contents = fs.readFileSync(logPath)
+  const headerSize = Number(contents.readBigUInt64LE(0))
+  const dataOffset = Number(contents.readBigUInt64LE(8))
+  const committedSize = Number(contents.readBigUInt64LE(16))
+  const frameSize = contents.readUInt16LE(dataOffset)
+  const payloadBytes = contents.subarray(dataOffset + 2, dataOffset + 2 + payload.length)
+  const suffix = contents.readUInt16LE(dataOffset + frameSize - 2)
+
+  return {
+    contents,
+    headerSize,
+    dataOffset,
+    committedSize,
+    frameSize,
+    payloadBytes,
+    suffix,
+  }
+}
+
+test('Shared log file is written in /dev/shm', t => {
+  const path = '/dev/shm/test-shared-log'
   if (fs.existsSync(path)) {
     fs.unlinkSync(path)
   }
 
-  const shm = new SharedMemory({
-    path,
-    size,
-    num,
-    overlap: 0,
-    writable: true,
-  })
+  const result = writeFrame(path)
 
-  const buffers = shm.getBuffers()
+  t.equal(result.headerSize, 24, 'header size should default to 24 bytes')
+  t.equal(result.dataOffset, 24, 'data offset should follow header')
+  t.equal(result.frameSize, result.payloadBytes.length + 4, 'frame size should include metadata bytes')
+  t.equal(result.suffix, result.frameSize, 'trailing size should match frame size')
+  t.equal(result.payloadBytes.toString('utf8'), 'hello', 'payload should be persisted to disk')
+  t.equal(result.contents.length, 64, 'file should be truncated to requested capacity')
 
-  const b0 = buffers[0]
-  const b1 = buffers[1]
-  const b3 = buffers[3]
-
-  b0[0] = 65
-  b0[1] = 66
-  b0[2] = 67
-
-  b1[3] = 68
-  b1[4] = 69
-
-  b3[5] = 70
-  b3[size - 1] = 71
-
-  const fileContents = fs.readFileSync(path)
-  const allBuffers = Buffer.concat(buffers)
-
-  t.deepEqual(allBuffers, fileContents)
-  t.equal(fileContents.length, size * num)
-  t.equal(buffers.length, num)
-  // delete the file after test
   fs.unlinkSync(path)
   t.end()
 })
 
 test('Memory mapped file is written in /tmp', t => {
-  const path = `/tmp/mapped_file_test`
-  const size = 8
-  const num = 4
-
-  // delete the file before test
+  const path = '/tmp/mapped-shared-log'
   if (fs.existsSync(path)) {
     fs.unlinkSync(path)
   }
 
-  const shm = new SharedMemory({
-    path,
-    size,
-    num,
-    overlap: 0,
-    writable: true,
-  })
+  const result = writeFrame(path)
 
-  const buffers = shm.getBuffers()
+  t.equal(result.headerSize, 24, 'header size should default to 24 bytes')
+  t.equal(result.dataOffset, 24, 'data offset should follow header')
+  t.equal(result.payloadBytes.toString('utf8'), 'hello', 'payload should be persisted to disk')
+  t.equal(result.contents.length, 64, 'file should be truncated to requested capacity')
 
-  buffers[0][0] = 65
-  buffers[1][0] = 66
-  buffers[2][0] = 67
-  buffers[3][0] = 68
-  buffers[3][size - 1] = 69
-
-  const fileContents = fs.readFileSync(path)
-  const allBuffers = Buffer.concat(buffers)
-
-  t.deepEqual(allBuffers, fileContents)
-  t.equal(fileContents.length, size * num)
-  t.equal(buffers.length, num)
-  // delete the file after test
   fs.unlinkSync(path)
   t.end()
 })
 
-test('non existent shm is opened for reading only', t => {
-  const path = `/dev/shm/test_readonly`
-  const size = 8
-  const num = 4
-
+test('non existent shared log cannot be opened read-only', t => {
+  const path = '/dev/shm/test-shared-log-readonly'
   if (fs.existsSync(path)) {
     fs.unlinkSync(path)
   }
 
   t.throws(() => {
-    /* tslint:disable:no-unused-expression */
-    new SharedMemory({
+    createSharedLog({
       path,
-      size,
-      num,
-      overlap: 0,
+      capacityBytes: 64,
       writable: false,
     })
-  })
+  }, 'opening read-only shared log without backing file should throw')
 
   t.end()
 })

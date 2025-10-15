@@ -4,6 +4,9 @@
 #include <sys/mman.h>
 #include <napi.h>
 #include <uv.h>
+#include "shm_iterator.h"
+#include "shm_mapping.h"
+#include "shm_writer.h"
 using namespace Napi;
 
 /**
@@ -58,6 +61,10 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set(Napi::String::New(env, "setup"),
     Napi::Function::New(env, setup)
   );
+
+  ShmIterator::Init(env, exports);
+  ShmMapping::Init(env, exports);
+  ShmWriter::Init(env, exports);
 
   return exports;
 }
