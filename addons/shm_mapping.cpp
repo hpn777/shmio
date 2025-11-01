@@ -49,27 +49,40 @@ Napi::Value ShmMapping::Open(const Napi::CallbackInfo& info) {
     return env.Null();
   }
 
-  auto capacityValue = opts.Get("capacityBytes");
-  if (!capacityValue.IsBigInt() && !capacityValue.IsNumber()) {
-    Napi::TypeError::New(env, "options.capacityBytes must be a number or bigint").ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
   bool writable = opts.Has("writable") ? opts.Get("writable").ToBoolean().Value() : false;
   bool debugChecks = opts.Has("debugChecks") ? opts.Get("debugChecks").ToBoolean().Value() : false;
 
   bool lossless = false;
   uint64_t capacityBytes = 0;
-  if (capacityValue.IsBigInt()) {
-    capacityBytes = capacityValue.As<Napi::BigInt>().Uint64Value(&lossless);
-  } else {
-    capacityBytes = static_cast<uint64_t>(capacityValue.As<Napi::Number>().DoubleValue());
-    lossless = true;
-  }
 
-  if (!lossless) {
-    Napi::TypeError::New(env, "capacityBytes must fit into uint64").ThrowAsJavaScriptException();
-    return env.Null();
+  bool hasCapacity = opts.Has("capacityBytes");
+  Napi::Value capacityValue = hasCapacity ? opts.Get("capacityBytes") : env.Undefined();
+
+  if (hasCapacity && !capacityValue.IsUndefined() && !capacityValue.IsNull()) {
+    if (!capacityValue.IsBigInt() && !capacityValue.IsNumber()) {
+      Napi::TypeError::New(env, "options.capacityBytes must be a number or bigint").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+
+    if (capacityValue.IsBigInt()) {
+      capacityBytes = capacityValue.As<Napi::BigInt>().Uint64Value(&lossless);
+    } else {
+      capacityBytes = static_cast<uint64_t>(capacityValue.As<Napi::Number>().DoubleValue());
+      lossless = true;
+    }
+
+    if (!lossless) {
+      Napi::TypeError::New(env, "capacityBytes must fit into uint64").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+  } else {
+    if (writable) {
+      Napi::TypeError::New(env, "capacityBytes is required when writable is true").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+
+    capacityBytes = kDefaultHeaderSize;
+    lossless = true;
   }
 
   if (capacityBytes < kDefaultHeaderSize) {

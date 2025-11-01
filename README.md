@@ -70,7 +70,6 @@ const bendec = new Bendec({ /* same schema as writer */ })
 
 const log = createSharedLog({
   path: '/dev/shm/myapp-events',
-  capacityBytes: 16n * 1024n * 1024n,
   writable: false,
 })
 
@@ -95,7 +94,7 @@ Creates (or opens) a memory-mapped append-only log. Options:
 ```typescript
 createSharedLog({
   path: string,                   // File path (/dev/shm/name for shared memory)
-  capacityBytes: number | bigint, // Desired file size when creating; existing files reuse their current size
+  capacityBytes?: number | bigint, // Desired file size when creating (required if writable=true; optional for read-only)
   writable: boolean,              // Enable writer support
   debugChecks?: boolean,          // Optional integrity checks for writer + iterator
 })
@@ -298,9 +297,22 @@ for (const buffer of iterator.nextBatch()) {
 
 On modern hardware (Intel i7, NVMe SSD):
 
-- Write throughput: ~2-5 million events/second
-- Read throughput: ~10-20 million events/second
-- Latency: <100ns per event (zero-copy)
+- Write throughput: ~250–360k events/sec (64–256 byte payloads)
+- Read throughput: ~400k events/sec (64-byte batched reads)
+- Latency: ~2.8–3.7 µs per event (write+commit), ~2.5 µs per event (read batch)
+
+To run the performance benchmark yourself:
+
+```bash
+npm run build
+node dist/tests/perf/bench.js
+```
+
+The benchmark includes:
+- Write performance across payload sizes (16–1024 bytes)
+- Batched read performance  
+- Throughput in events/sec and MB/sec
+- Per-event latency in microseconds and nanoseconds
 
 ### Best Practices
 

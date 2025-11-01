@@ -66,8 +66,8 @@ export interface NativeSharedLogHandle {
 
 export interface OpenSharedLogOptions {
   path: string
-  capacityBytes: bigint
   writable: boolean
+  capacityBytes?: bigint
   debugChecks?: boolean
 }
 

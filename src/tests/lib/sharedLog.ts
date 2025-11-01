@@ -1,6 +1,5 @@
 import test from 'tape'
 import { promises as fs } from 'fs'
-import { range } from 'lodash'
 import { createSharedLog } from '../../lib/SharedLog'
 
 const logPath = (name: string) => `/dev/shm/${name}`
@@ -22,9 +21,9 @@ test('shared log writer allocates frames and iterator reads them', async t => {
 
   t.ok(log.writer, 'writer should be available for writable log')
   const writer = log.writer!
-  const payloads = range(0, 3).map(i => `payload-${i}`)
+  const payloads = Array.from({ length: 3 }, (_, i) => `payload-${i}`)
 
-  payloads.forEach(value => {
+  payloads.forEach((value: string) => {
     const buf = writer.allocate(32)
     writeString(buf, value)
   })
