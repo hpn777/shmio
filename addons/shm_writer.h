@@ -18,6 +18,8 @@ private:
   Napi::Value Allocate(const Napi::CallbackInfo& info);
   void Commit(const Napi::CallbackInfo& info);
   void Close(const Napi::CallbackInfo& info);
+  Napi::Value GetLastAllocatedAddress(const Napi::CallbackInfo& info);
+  Napi::Value GetBufferAtAddress(const Napi::CallbackInfo& info);
 
   void EnsureOpen(Napi::Env env) const;
   void WriteFrameHeaders(uint8_t* framePtr, uint32_t frameSize) const;
@@ -30,4 +32,6 @@ private:
   bool debugChecks_ { false };
   uint64_t cursor_ { 0 };
   uint64_t pendingBytes_ { 0 };
+  uint64_t lastAllocatedOffset_ { 0 };
+  uint32_t lastAllocatedPayloadSize_ { 0 };
 };

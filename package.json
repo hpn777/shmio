@@ -1,6 +1,6 @@
 {
   "name": "shmio",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Rafal Okninski <hpn777@gmail.com>",
   "description": "SHM IO project",
   "main": "./dist/lib/index.js",

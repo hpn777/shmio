@@ -18,6 +18,8 @@ void ShmWriter::Init(Napi::Env env, Napi::Object exports) {
     InstanceMethod<&ShmWriter::Allocate>("allocate"),
     InstanceMethod<&ShmWriter::Commit>("commit"),
     InstanceMethod<&ShmWriter::Close>("close"),
+    InstanceMethod<&ShmWriter::GetLastAllocatedAddress>("getLastAllocatedAddress"),
+    InstanceMethod<&ShmWriter::GetBufferAtAddress>("getBufferAtAddress"),
   });
 
   constructor_ = Napi::Persistent(func);
@@ -125,6 +127,10 @@ Napi::Value ShmWriter::Allocate(const Napi::CallbackInfo& info) {
 
   uint8_t* payloadPtr = framePtr + kMessageHeaderBytes;
 
+  // Track last allocated buffer location
+  lastAllocatedOffset_ = writeCursor + kMessageHeaderBytes;
+  lastAllocatedPayloadSize_ = payloadSize;
+
   pendingBytes_ += frameSize;
 
   return Napi::Buffer<uint8_t>::New(env, payloadPtr, payloadSize);
@@ -147,10 +153,78 @@ void ShmWriter::Commit(const Napi::CallbackInfo& info) {
 void ShmWriter::Close(const Napi::CallbackInfo& info) {
   closed_ = true;
   pendingBytes_ = 0;
+  lastAllocatedOffset_ = 0;
+  lastAllocatedPayloadSize_ = 0;
   if (!mappingRef_.IsEmpty()) {
     mappingRef_.Reset();
   }
   mapping_ = nullptr;
+}
+
+Napi::Value ShmWriter::GetLastAllocatedAddress(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  EnsureOpen(env);
+  if (env.IsExceptionPending()) {
+    return env.Null();
+  }
+
+  if (lastAllocatedPayloadSize_ == 0) {
+    return env.Null();
+  }
+
+  return Napi::BigInt::New(env, lastAllocatedOffset_);
+}
+
+Napi::Value ShmWriter::GetBufferAtAddress(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  EnsureOpen(env);
+  if (env.IsExceptionPending()) {
+    return env.Null();
+  }
+
+  if (info.Length() < 2) {
+    Napi::TypeError::New(env, "getBufferAtAddress(address, size) expects two arguments")
+      .ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  uint64_t address;
+  if (info[0].IsBigInt()) {
+    bool lossless;
+    address = info[0].As<Napi::BigInt>().Uint64Value(&lossless);
+    if (!lossless) {
+      Napi::RangeError::New(env, "Address value out of range").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+  } else if (info[0].IsNumber()) {
+    address = static_cast<uint64_t>(info[0].As<Napi::Number>().Int64Value());
+  } else {
+    Napi::TypeError::New(env, "address must be a number or BigInt").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  if (!info[1].IsNumber()) {
+    Napi::TypeError::New(env, "size must be a number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  int64_t size = info[1].As<Napi::Number>().Int64Value();
+  if (size <= 0) {
+    Napi::RangeError::New(env, "size must be positive").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  uint64_t dataOffset = mapping_->dataOffset();
+  uint64_t length = mapping_->length();
+  uint8_t* base = mapping_->base();
+
+  if (address < dataOffset || address + static_cast<uint64_t>(size) > length) {
+    Napi::RangeError::New(env, "Address/size out of bounds").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  uint8_t* ptr = base + address;
+  return Napi::Buffer<uint8_t>::New(env, ptr, static_cast<size_t>(size));
 }
 
 uint16_t ShmWriter::ReadUint16LE(const uint8_t* data) {

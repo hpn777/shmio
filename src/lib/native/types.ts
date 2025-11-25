@@ -55,6 +55,8 @@ export interface ShmWriter {
   allocate(size: number, options?: { debugChecks?: boolean }): Buffer
   commit(): void
   close(): void
+  getLastAllocatedAddress(): bigint | null
+  getBufferAtAddress(address: bigint | number, size: number): Buffer
 }
 
 export interface NativeSharedLogHandle {
